@@ -7,12 +7,15 @@ import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/utils/Strings.sol";
 import "@openzeppelin/contracts/utils/cryptography/MerkleProof.sol";
 
-/**
- * @title Little Abstract Boops Soulbound Token
- * @notice This contract manages a non-transferable (soulbound) NFT collection
- * @dev Implements ERC721 with transfer restrictions
- */
-contract LabSBT is ERC721, Ownable, ReentrancyGuard {
+interface IERC6454 {
+    function isTransferable(
+        uint256 tokenId,
+        address from,
+        address to
+    ) external view returns (bool);
+}
+
+contract LabSBT is ERC721, IERC6454, Ownable, ReentrancyGuard {
     // Custom errors
     error MintNotActive();
     error InsufficientPayment();
@@ -20,7 +23,7 @@ contract LabSBT is ERC721, Ownable, ReentrancyGuard {
     error AlreadyClaimed();
     error MaxSupplyReached();
     error TransferFailed();
-    error SoulboundTokensNotTransferable();
+    error NonTransferableToken();
 
     // State variables
     bool public activeMint;
@@ -32,7 +35,7 @@ contract LabSBT is ERC721, Ownable, ReentrancyGuard {
     uint256 public constant MAX_SUPPLY = 1000;
 
     // Base URI for token metadata
-    string private baseURI;
+    string private _baseTokenURI;
 
     // Mapping to track if address has minted
     mapping(address => bool) public hasMinted;
@@ -51,44 +54,33 @@ contract LabSBT is ERC721, Ownable, ReentrancyGuard {
     }
 
     /**
-     * @dev Override transfer functions to prevent transfers
+     * @inheritdoc IERC6454
      */
-    function transferFrom(
+    function isTransferable(
+        uint256, // tokenId
         address from,
-        address to,
-        uint256 tokenId
-    ) public override {
-        revert SoulboundTokensNotTransferable();
+        address // to
+    ) public view virtual override returns (bool) {
+        // Only allow minting (transfer from zero address)
+        return from == address(0);
     }
 
-    function safeTransferFrom(
-        address from,
-        address to,
-        uint256 tokenId
-    ) public override {
-        revert SoulboundTokensNotTransferable();
-    }
-
-    function safeTransferFrom(
-        address from,
+    function _update(
         address to,
         uint256 tokenId,
-        bytes memory data
-    ) public override {
-        revert SoulboundTokensNotTransferable();
+        address auth
+    ) internal virtual override returns (address from) {
+        from = _ownerOf(tokenId);
+        if (!isTransferable(tokenId, from, to)) {
+            revert NonTransferableToken();
+        }
+        return super._update(to, tokenId, auth);
     }
 
-    /**
-     * @dev Enables or disables minting
-     */
     function setActiveMint(bool _activeMint) external onlyOwner {
         activeMint = _activeMint;
     }
 
-    /**
-     * @dev Main minting function with whitelist verification
-     * @param _merkleProof Proof for whitelist verification
-     */
     function mint(
         bytes32[] calldata _merkleProof
     ) external payable nonReentrant {
@@ -108,10 +100,6 @@ contract LabSBT is ERC721, Ownable, ReentrancyGuard {
         emit NFTMinted(msg.sender, totalSupply);
     }
 
-    /**
-     * @dev Owner mint function
-     * @param to Address to receive the token
-     */
     function mintTo(address to) external onlyOwner nonReentrant {
         if (hasMinted[to]) revert AlreadyClaimed();
         if (totalSupply + 1 > MAX_SUPPLY) revert MaxSupplyReached();
@@ -133,25 +121,26 @@ contract LabSBT is ERC721, Ownable, ReentrancyGuard {
         emit MerkleRootUpdated(_newMerkleRoot);
     }
 
-    function setBaseURI(string memory _newBaseURI) external onlyOwner {
-        baseURI = _newBaseURI;
-        emit BaseURIUpdated(_newBaseURI);
+    function setBaseURI(string memory newBaseURI) external onlyOwner {
+        _baseTokenURI = newBaseURI;
+        emit BaseURIUpdated(newBaseURI);
     }
 
-    function _baseURI() internal view override returns (string memory) {
-        return baseURI;
+    function _baseURI() internal view virtual override returns (string memory) {
+        return _baseTokenURI;
     }
 
     function tokenURI(
         uint256 tokenId
-    ) public view override returns (string memory) {
+    ) public view virtual override returns (string memory) {
         _requireOwned(tokenId);
-        string memory baseURI = _baseURI();
+
+        string memory baseURI_ = _baseURI();
         return
-            bytes(baseURI).length > 0
+            bytes(baseURI_).length > 0
                 ? string(
                     abi.encodePacked(
-                        baseURI,
+                        baseURI_,
                         Strings.toString(tokenId),
                         ".json"
                     )
@@ -161,5 +150,13 @@ contract LabSBT is ERC721, Ownable, ReentrancyGuard {
 
     function getCurrentMinted() public view returns (uint256) {
         return totalSupply;
+    }
+
+    function supportsInterface(
+        bytes4 interfaceId
+    ) public view virtual override returns (bool) {
+        return
+            interfaceId == type(IERC6454).interfaceId ||
+            super.supportsInterface(interfaceId);
     }
 }

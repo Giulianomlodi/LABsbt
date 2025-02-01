@@ -5,19 +5,20 @@ import {Script} from "forge-std/Script.sol";
 import {LabSBT} from "../src/LabSBT.sol";
 
 contract DeployLabSBT is Script {
-    function run() external {
-        // Get deployer address from keystore
+    function run() external returns (LabSBT) {
+        uint256 deployerPrivateKey = vm.envUint("DEPLOYER_KEY");
+
+        // Configuration
         uint256 mintPrice = 0.1 ether;
 
         // Start broadcast
-        vm.startBroadcast();
+        vm.startBroadcast(deployerPrivateKey);
 
-        // Deploy using simple new operator
-        LabSBT labSbt = new LabSBT{salt: 0}(mintPrice);
-
-        // Optional post-deployment setup
-        labSbt.setActiveMint(true);
+        // Deploy contract
+        LabSBT labSbt = new LabSBT(mintPrice);
 
         vm.stopBroadcast();
+
+        return labSbt;
     }
 }
